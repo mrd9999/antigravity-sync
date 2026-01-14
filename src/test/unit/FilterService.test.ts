@@ -1,7 +1,7 @@
 /**
  * FilterService Unit Tests
  */
-import { FilterService } from '../services/FilterService';
+import { FilterService } from '../../services/FilterService';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -29,8 +29,8 @@ describe('FilterService', () => {
       expect(filterService.shouldIgnore('browser_recordings/video.webm')).toBe(true);
     });
 
-    it('should ignore .pb files', () => {
-      expect(filterService.shouldIgnore('conversations/123.pb')).toBe(true);
+    it('should allow .pb files (conversations)', () => {
+      expect(filterService.shouldIgnore('conversations/123.pb')).toBe(false);
     });
 
     it('should ignore .DS_Store', () => {
@@ -75,7 +75,7 @@ describe('FilterService', () => {
       const excludes = FilterService.getDefaultExcludes();
       expect(excludes).toContain('google_accounts.json');
       expect(excludes).toContain('oauth_creds.json');
-      expect(excludes).toContain('browser_recordings/');
+      expect(excludes).toContain('**/browser_recordings/**');
     });
   });
 

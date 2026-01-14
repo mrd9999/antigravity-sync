@@ -1,7 +1,7 @@
 /**
  * ConfigService Unit Tests
  */
-import { ConfigService, SyncConfig } from '../services/ConfigService';
+import { ConfigService, SyncConfig } from '../../services/ConfigService';
 import * as vscode from 'vscode';
 
 // Mock vscode module
@@ -108,7 +108,7 @@ describe('ConfigService', () => {
     it('should save credentials securely', async () => {
       await configService.saveCredentials('ghp_test_token');
       expect(mockSecrets.store).toHaveBeenCalledWith(
-        'antigravitySync.githubPat',
+        'antigravitySync.gitToken',
         'ghp_test_token'
       );
     });
@@ -121,7 +121,7 @@ describe('ConfigService', () => {
 
     it('should delete credentials', async () => {
       await configService.deleteCredentials();
-      expect(mockSecrets.delete).toHaveBeenCalledWith('antigravitySync.githubPat');
+      expect(mockSecrets.delete).toHaveBeenCalledWith('antigravitySync.gitToken');
     });
   });
 });

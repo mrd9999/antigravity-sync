@@ -3,8 +3,9 @@
   "displayName": "Antigravity Sync",
   "description": "Sync your Gemini Antigravity context across machines via private Git repository. Never lose your AI conversation history, Knowledge Items, and brain artifacts when switching computers.",
   "version": "0.1.0",
-  "publisher": "antigravity-sync",
+  "publisher": "mrd9999",
   "author": "Dung Le <https://www.facebook.com/mrd.900s>",
+  "icon": "resources/icons/icon.png",
   "license": "MIT",
   "repository": {
     "type": "git",

@@ -184,20 +184,32 @@ export class GitService {
           return;
         }
 
-        // Divergent branches or rebase conflict - use "remote wins" strategy
+        // Divergent branches or rebase conflict - use "local wins" strategy
         if (gitError.message?.includes('divergent') ||
           gitError.message?.includes('reconcile') ||
           gitError.message?.includes('CONFLICT') ||
           gitError.message?.includes('conflict') ||
           gitError.message?.includes('Exiting') ||
-          gitError.message?.includes('unresolved')) {
+          gitError.message?.includes('unresolved') ||
+          gitError.message?.includes('needs merge') ||
+          gitError.message?.includes('could not write index') ||
+          gitError.message?.includes('index.lock')) {
+          // Cleanup any stale git state
           await this.git.rebase({ '--abort': null }).catch(() => { });
-          await this.git.fetch('origin');
-          await this.git.reset(['--hard', 'origin/main']);
-          // Pop stash if we had changes
+          await this.git.raw(['merge', '--abort']).catch(() => { });
+          this.cleanupIndexLock();
+
+          // Pop stash first to restore local changes
           if (hasChanges) {
             await this.git.stash(['pop']).catch(() => { });
           }
+
+          // Stage all local changes and commit
+          await this.git.add('-A');
+          await this.git.commit('Sync: local changes preserved').catch(() => { });
+
+          // Force push local version to remote (local wins)
+          await this.git.push('origin', 'main', ['--force']).catch(() => { });
           return;
         }
 
@@ -286,5 +298,15 @@ export class GitService {
       }
     }
     return url;
+  }
+
+  /**
+   * Remove stale index.lock if exists (from crashed git process)
+   */
+  private cleanupIndexLock(): void {
+    const lockPath = path.join(this.repoPath, '.git', 'index.lock');
+    if (fs.existsSync(lockPath)) {
+      fs.unlinkSync(lockPath);
+    }
   }
 }
