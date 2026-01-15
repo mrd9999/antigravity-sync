@@ -156,10 +156,11 @@ export class SidePanelProvider implements vscode.WebviewViewProvider {
       const tempGitService = new GitService(this._configService.getSyncRepoPath());
       await tempGitService.verifyAccess(repoUrl, pat);
 
-      // Only save credentials after verification succeeds
-      this.sendLog('Saving credentials...', 'info');
-      await this._configService.saveCredentials(pat);
+      // Save URL first (credentials storage depends on URL)
+      this.sendLog('Saving credentials to Git credential manager...', 'info');
       await this._configService.setRepositoryUrl(repoUrl);
+      // Now save credentials (uses Git credential manager - persists across workspaces)
+      await this._configService.saveCredentials(pat);
 
       // Initialize sync
       this.sendLog('Initializing Git repository...', 'info');

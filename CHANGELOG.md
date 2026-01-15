@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-01-15
+
+### Added
+- Git Credential Manager integration for persistent credential storage
+- Per-repository credential support (no conflicts with multiple GitHub accounts)
+- Cross-platform credential storage (macOS Keychain, Windows Credential Manager, Linux libsecret/GNOME Keyring)
+- Automatic credential helper configuration
+
+### Changed
+- Credentials now stored via Git credential manager instead of VS Code secret storage
+- Credentials persist across all workspaces and VS Code installations
+- No need to re-enter credentials when switching workspaces
+
+### Security
+- Credentials stored in OS-native secure storage
+- Per-repository isolation prevents credential conflicts
+- Backwards compatible with existing host-level credentials
+
 ## [0.1.0] - 2026-01-13
 
 ### Added

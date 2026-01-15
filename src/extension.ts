@@ -178,8 +178,9 @@ async function configureRepository(
       async (progress) => {
         progress.report({ message: 'Checking repository...' });
 
-        await configService.saveCredentials(token);
+        // URL must be set first (credentials storage depends on URL)
         await configService.setRepositoryUrl(repoUrl);
+        await configService.saveCredentials(token);
 
         progress.report({ message: 'Initializing sync...' });
         await syncService.initialize();

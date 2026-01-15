@@ -4,6 +4,10 @@
 import simpleGit, { SimpleGit, SimpleGitOptions } from 'simple-git';
 import * as fs from 'fs';
 import * as path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 export class GitService {
   private git: SimpleGit;
@@ -25,6 +29,211 @@ export class GitService {
     };
 
     this.git = simpleGit(options);
+  }
+
+  /**
+   * Store credentials in Git credential manager
+   * This stores credentials in the system's secure credential store
+   */
+  async storeCredentials(url: string, token: string): Promise<void> {
+    const parsed = this.parseGitUrl(url);
+    if (!parsed) {
+      throw new Error('Invalid Git URL');
+    }
+
+    // Format for git credential store:
+    // protocol=https
+    // host=github.com
+    // username=token (or oauth2 for GitLab)
+    // password=<the actual token>
+    const isGitLab = url.includes('gitlab');
+    const username = isGitLab ? 'oauth2' : 'token';
+
+    const credentialInput = `protocol=${parsed.protocol}\nhost=${parsed.host}\nusername=${username}\npassword=${token}\n`;
+
+    try {
+      // First, configure credential helper if not set
+      await this.configureCredentialHelper();
+
+      // Store the credential using git credential approve
+      await new Promise<void>((resolve, reject) => {
+        const child = exec('git credential approve', { cwd: this.repoPath }, (error) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve();
+          }
+        });
+        child.stdin?.write(credentialInput);
+        child.stdin?.end();
+      });
+    } catch (error) {
+      // Fallback: try git credential-store directly
+      const credentialStorePath = path.join(require('os').homedir(), '.git-credentials');
+      const credentialLine = `${parsed.protocol}://${username}:${token}@${parsed.host}\n`;
+
+      // Read existing credentials and check if this host already exists
+      let existingContent = '';
+      if (fs.existsSync(credentialStorePath)) {
+        existingContent = fs.readFileSync(credentialStorePath, 'utf8');
+        // Remove any existing credential for this host
+        const lines = existingContent.split('\n').filter(line => !line.includes(`@${parsed.host}`));
+        existingContent = lines.join('\n');
+        if (existingContent && !existingContent.endsWith('\n')) {
+          existingContent += '\n';
+        }
+      }
+
+      fs.writeFileSync(credentialStorePath, existingContent + credentialLine, { mode: 0o600 });
+    }
+  }
+
+  /**
+   * Retrieve credentials from Git credential manager
+   */
+  async getCredentials(url: string): Promise<string | undefined> {
+    const parsed = this.parseGitUrl(url);
+    if (!parsed) {
+      return undefined;
+    }
+
+    const credentialInput = `protocol=${parsed.protocol}\nhost=${parsed.host}\n`;
+
+    try {
+      const result = await new Promise<string>((resolve, reject) => {
+        let output = '';
+        const child = exec('git credential fill', { cwd: this.repoPath }, (error, stdout) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve(stdout);
+          }
+        });
+        child.stdin?.write(credentialInput);
+        child.stdin?.end();
+      });
+
+      // Parse the output to extract password
+      const passwordMatch = result.match(/password=(.+)/);
+      if (passwordMatch) {
+        return passwordMatch[1].trim();
+      }
+    } catch {
+      // Fallback: try reading from .git-credentials directly
+      const credentialStorePath = path.join(require('os').homedir(), '.git-credentials');
+      if (fs.existsSync(credentialStorePath)) {
+        const content = fs.readFileSync(credentialStorePath, 'utf8');
+        const lines = content.split('\n');
+        for (const line of lines) {
+          if (line.includes(`@${parsed.host}`)) {
+            // Extract password from URL format: protocol://username:password@host
+            const match = line.match(/:([^:@]+)@/);
+            if (match) {
+              return match[1];
+            }
+          }
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Delete credentials from Git credential manager
+   */
+  async deleteCredentials(url: string): Promise<void> {
+    const parsed = this.parseGitUrl(url);
+    if (!parsed) {
+      return;
+    }
+
+    const credentialInput = `protocol=${parsed.protocol}\nhost=${parsed.host}\n`;
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const child = exec('git credential reject', { cwd: this.repoPath }, (error) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve();
+          }
+        });
+        child.stdin?.write(credentialInput);
+        child.stdin?.end();
+      });
+    } catch {
+      // Fallback: remove from .git-credentials file
+      const credentialStorePath = path.join(require('os').homedir(), '.git-credentials');
+      if (fs.existsSync(credentialStorePath)) {
+        const content = fs.readFileSync(credentialStorePath, 'utf8');
+        const lines = content.split('\n').filter(line => !line.includes(`@${parsed.host}`));
+        fs.writeFileSync(credentialStorePath, lines.join('\n'), { mode: 0o600 });
+      }
+    }
+  }
+
+  /**
+   * Configure Git credential helper to use system store
+   */
+  private async configureCredentialHelper(): Promise<void> {
+    try {
+      // Check if credential helper is already configured globally
+      const { stdout } = await execAsync('git config --global credential.helper');
+      if (stdout.trim()) {
+        return; // Already configured
+      }
+    } catch {
+      // Not configured, set it up
+    }
+
+    // Configure credential helper based on platform
+    const platform = process.platform;
+    let helper: string;
+
+    if (platform === 'darwin') {
+      helper = 'osxkeychain';
+    } else if (platform === 'win32') {
+      helper = 'manager';
+    } else {
+      // Linux - use store (file-based) or libsecret if available
+      try {
+        await execAsync('which git-credential-libsecret');
+        helper = 'libsecret';
+      } catch {
+        helper = 'store';
+      }
+    }
+
+    await execAsync(`git config --global credential.helper ${helper}`);
+  }
+
+  /**
+   * Parse Git URL to extract protocol and host
+   */
+  private parseGitUrl(url: string): { protocol: string; host: string; path: string } | null {
+    // Handle https://host/path format
+    if (url.startsWith('https://')) {
+      const match = url.match(/https:\/\/([^/]+)(\/.*)?/);
+      if (match) {
+        return { protocol: 'https', host: match[1], path: match[2] || '' };
+      }
+    }
+    // Handle http://host/path format
+    if (url.startsWith('http://')) {
+      const match = url.match(/http:\/\/([^/]+)(\/.*)?/);
+      if (match) {
+        return { protocol: 'http', host: match[1], path: match[2] || '' };
+      }
+    }
+    // Handle git@host:path format
+    if (url.startsWith('git@')) {
+      const match = url.match(/git@([^:]+):(.+)/);
+      if (match) {
+        return { protocol: 'https', host: match[1], path: '/' + match[2] };
+      }
+    }
+    return null;
   }
 
   /**

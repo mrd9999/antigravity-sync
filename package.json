@@ -2,7 +2,7 @@
   "name": "antigravity-sync",
   "displayName": "Antigravity Sync",
   "description": "Sync your Gemini Antigravity context across machines via private Git repository. Never lose your AI conversation history, Knowledge Items, and brain artifacts when switching computers.",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "publisher": "mrd9999",
   "author": "Dung Le <https://www.facebook.com/mrd.900s>",
   "icon": "resources/icons/icon.png",
@@ -137,7 +137,7 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "yarn run build",
+    "vscode:prepublish": "npm run build",
     "build": "webpack --mode production",
     "build:dev": "webpack --mode development",
     "watch": "webpack --mode development --watch",
@@ -147,8 +147,8 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:e2e": "vscode-test",
-    "package": "vsce package --yarn",
-    "publish": "vsce publish --yarn"
+    "package": "vsce package --no-yarn",
+    "publish": "vsce publish --no-yarn"
   },
   "devDependencies": {
     "@types/jest": "^29.5.11",
