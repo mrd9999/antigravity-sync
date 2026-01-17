@@ -9,9 +9,13 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
+export type LogType = 'info' | 'success' | 'error';
+export type LoggerCallback = (message: string, type: LogType) => void;
+
 export class GitService {
   private git: SimpleGit;
   private repoPath: string;
+  private logger?: LoggerCallback;
 
   constructor(repoPath: string) {
     this.repoPath = repoPath;
@@ -29,6 +33,26 @@ export class GitService {
     };
 
     this.git = simpleGit(options);
+  }
+
+  /**
+   * Set logger callback for sending logs to UI
+   */
+  setLogger(logger: LoggerCallback): void {
+    this.logger = logger;
+  }
+
+  /**
+   * Log message to both console and UI (if logger is set)
+   */
+  private log(message: string, type: LogType = 'info'): void {
+    const now = new Date();
+    const timestamp = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    const formattedMessage = `[${timestamp}] ${message}`;
+    console.log(formattedMessage);
+    if (this.logger) {
+      this.logger(formattedMessage, type);
+    }
   }
 
   /**
@@ -366,26 +390,218 @@ export class GitService {
   }
 
   /**
+   * Resolve binary file conflict using Smart Resolution:
+   * - If size difference > 20%: keep larger (more content)
+   * - Else: keep newer (more recent)
+   * @returns 'local' or 'remote' indicating which version was kept
+   */
+  private async resolveBinaryConflict(relativePath: string): Promise<'local' | 'remote'> {
+    const SIZE_DIFF_THRESHOLD = 0.2; // 20%
+
+    // Get local file info from working directory
+    const localFilePath = path.join(this.repoPath, relativePath);
+    const localExists = fs.existsSync(localFilePath);
+    const localStats = localExists ? fs.statSync(localFilePath) : null;
+    const localSize = localStats?.size || 0;
+    const localMtime = localStats?.mtime || new Date(0);
+
+    // Get remote file info from git
+    let remoteSize = 0;
+    let remoteMtime = new Date(0);
+    try {
+      // Get remote file content to determine size
+      const content = await this.git.show([`origin/main:${relativePath}`]);
+      remoteSize = Buffer.byteLength(content, 'binary');
+
+      // Get remote commit time for this file
+      const log = await this.git.log({ file: relativePath, maxCount: 1 });
+      if (log.latest?.date) {
+        remoteMtime = new Date(log.latest.date);
+      }
+    } catch {
+      // File might not exist in remote, that's OK
+    }
+
+    // Calculate size difference ratio
+    const maxSize = Math.max(localSize, remoteSize);
+    const sizeDiffRatio = maxSize > 0 ? Math.abs(localSize - remoteSize) / maxSize : 0;
+
+    let keepLocal: boolean;
+
+    if (sizeDiffRatio > SIZE_DIFF_THRESHOLD) {
+      // Large size difference → keep larger file (more content = more important)
+      keepLocal = localSize >= remoteSize;
+      this.log(`[Conflict] ${relativePath}: size diff ${(sizeDiffRatio * 100).toFixed(0)}% (local: ${localSize}, remote: ${remoteSize}) → keep ${keepLocal ? 'local' : 'remote'} (larger)`);
+    } else {
+      // Similar size → keep newer file
+      keepLocal = localMtime >= remoteMtime;
+      this.log(`[Conflict] ${relativePath}: similar size → keep ${keepLocal ? 'local' : 'remote'} (newer: ${keepLocal ? localMtime.toISOString() : remoteMtime.toISOString()})`);
+    }
+
+    // Resolve conflict by checking out the chosen version
+    if (keepLocal) {
+      await this.git.raw(['checkout', '--ours', relativePath]);
+    } else {
+      await this.git.raw(['checkout', '--theirs', relativePath]);
+    }
+    await this.git.add(relativePath);
+
+    return keepLocal ? 'local' : 'remote';
+  }
+
+  /**
+   * Handle Smart Merge - resolve conflicts using larger/newer wins strategy
+   * @param hasStash - whether there's a stash to pop
+   */
+  private async handleSmartMerge(hasStash: boolean): Promise<void> {
+    this.log('[SmartSync] === SMART MERGE STARTED ===');
+
+    // Step 1: Cleanup stale git state
+    this.log('[SmartSync] Step 1: Cleaning up stale git state...');
+    const rebaseAbortResult = await this.git.rebase({ '--abort': null }).catch(e => `rebase abort: ${e.message}`);
+    this.log(`[SmartSync] Rebase abort result: ${rebaseAbortResult}`);
+    const mergeAbortResult = await this.git.raw(['merge', '--abort']).catch(e => `merge abort: ${e.message}`);
+    this.log(`[SmartSync] Merge abort result: ${mergeAbortResult}`);
+    this.cleanupIndexLock();
+    this.log('[SmartSync] Index lock cleaned');
+
+    // Step 2: Pop stash if any
+    if (hasStash) {
+      this.log('[SmartSync] Step 2: Popping stash...');
+      const stashPopResult = await this.git.stash(['pop']).catch(e => `stash pop failed: ${e.message}`);
+      this.log(`[SmartSync] Stash pop result: ${stashPopResult}`);
+    }
+
+    // Step 3: Hard reset to clear ANY corrupt index state
+    this.log('[SmartSync] Step 3: Hard resetting to HEAD...');
+    await this.git.reset(['--hard', 'HEAD']).catch(e => this.log(`[SmartSync] Reset failed: ${e.message}`));
+
+    // Step 4: Fetch latest remote
+    this.log('[SmartSync] Step 4: Fetching origin...');
+    await this.git.fetch('origin');
+    this.log('[SmartSync] Fetch complete');
+
+    // Step 5: Get files that differ between local and remote
+    this.log('[SmartSync] Step 5: Getting differing files...');
+    let differingFiles: string[] = [];
+    try {
+      const diffOutput = await this.git.raw(['diff', '--name-only', 'HEAD', 'origin/main']);
+      differingFiles = diffOutput.split('\n').filter(f => f.trim().length > 0);
+      this.log(`[SmartSync] Diff output (${differingFiles.length} files): ${differingFiles.slice(0, 10).join(', ')}${differingFiles.length > 10 ? '...' : ''}`);
+    } catch (diffError) {
+      this.log(`[SmartSync] Diff failed: ${(diffError as Error).message}`);
+      differingFiles = [];
+    }
+
+    const binaryExtensions = ['.pb', '.pbtxt', '.png', '.jpg', '.webp', '.gif'];
+    const binaryFiles = differingFiles.filter(f => binaryExtensions.some(ext => f.endsWith(ext)));
+    this.log(`[SmartSync] Found ${binaryFiles.length} binary files to resolve`);
+
+    // Step 6: For binary files, apply Smart Resolution
+    this.log('[SmartSync] Step 6: Applying Smart Resolution to binary files...');
+    for (const file of binaryFiles) {
+      try {
+        // Get local file info
+        const localFilePath = path.join(this.repoPath, file);
+        const localExists = fs.existsSync(localFilePath);
+        const localStats = localExists ? fs.statSync(localFilePath) : null;
+        const localSize = localStats?.size || 0;
+        const localMtime = localStats?.mtime || new Date(0);
+
+        // Get remote file info
+        let remoteSize = 0;
+        let remoteMtime = new Date(0);
+        try {
+          const content = await this.git.show([`origin/main:${file}`]);
+          remoteSize = Buffer.byteLength(content, 'binary');
+          const log = await this.git.log({ file, maxCount: 1 });
+          if (log.latest?.date) remoteMtime = new Date(log.latest.date);
+        } catch { /* remote might not have file */ }
+
+        // Decide: larger wins if diff > 20%, else newer wins
+        const sizeDiffRatio = Math.max(localSize, remoteSize) > 0
+          ? Math.abs(localSize - remoteSize) / Math.max(localSize, remoteSize)
+          : 0;
+
+        let keepLocal: boolean;
+        if (sizeDiffRatio > 0.2) {
+          keepLocal = localSize >= remoteSize;
+          this.log(`[SmartSync] ${file}: size ${localSize} vs ${remoteSize} (${(sizeDiffRatio * 100).toFixed(0)}%) → keep ${keepLocal ? 'LOCAL' : 'REMOTE'} (larger)`);
+        } else {
+          keepLocal = localMtime >= remoteMtime;
+          this.log(`[SmartSync] ${file}: similar size → keep ${keepLocal ? 'LOCAL' : 'REMOTE'} (newer)`);
+        }
+
+        // If remote wins, checkout remote version
+        if (!keepLocal) {
+          this.log(`[SmartSync] Checking out remote version of ${file}...`);
+          await this.git.raw(['checkout', 'origin/main', '--', file]).catch(e =>
+            this.log(`[SmartSync] Checkout failed: ${e.message}`)
+          );
+        }
+        // If local wins, keep current file (do nothing)
+      } catch (err) {
+        this.log(`[SmartSync] Error processing ${file}: ${(err as Error).message}`);
+      }
+    }
+
+    // Step 7: Stage all changes
+    this.log('[SmartSync] Step 7: Staging all changes...');
+    await this.git.add('-A');
+    const statusAfterAdd = await this.git.status();
+    this.log(`[SmartSync] Status after add: ${statusAfterAdd.files.length} staged, conflicted: ${statusAfterAdd.conflicted?.length || 0}`);
+
+    // Step 8: Commit merged result
+    this.log('[SmartSync] Step 8: Committing...');
+    const commitResult = await this.git.commit('Sync: smart merge (larger/newer wins)').catch(e => `commit failed: ${e.message}`);
+    this.log(`[SmartSync] Commit result: ${JSON.stringify(commitResult)}`);
+
+    // Step 9: Force push to resolve divergence
+    this.log('[SmartSync] Step 9: Force pushing...');
+    const pushResult = await this.git.push('origin', 'main', ['--force']).catch(e => `push failed: ${e.message}`);
+    this.log(`[SmartSync] Push result: ${JSON.stringify(pushResult)}`);
+
+    this.log('[SmartSync] === SMART MERGE COMPLETE ===');
+  }
+
+  /**
    * Pull from remote (handles divergent branches with rebase)
    */
   async pull(): Promise<void> {
+    this.log('[GitService.pull] Starting pull...');
     try {
-      // Stash any local changes first
+      // Check initial status
       const status = await this.git.status();
       const hasChanges = status.files.length > 0;
+      const hasPreExistingConflicts = (status.conflicted?.length || 0) > 0;
+      this.log(`[GitService.pull] Status: ${status.files.length} files, hasChanges=${hasChanges}`);
+      this.log(`[GitService.pull] Conflicted files: ${status.conflicted?.length || 0}`);
+      this.log(`[GitService.pull] Pre-existing conflicts: ${hasPreExistingConflicts}`);
+
+      // If there are pre-existing conflicts (ghost conflict state), handle them first
+      if (hasPreExistingConflicts) {
+        this.log('[GitService.pull] Pre-existing conflicts detected, jumping to Smart Merge...');
+        await this.handleSmartMerge(false); // false = no stash to pop
+        return;
+      }
 
       if (hasChanges) {
+        this.log('[GitService.pull] Stashing local changes...');
         await this.git.stash(['push', '-m', 'antigravity-sync-temp']);
       }
 
       try {
         // Try pull with rebase to handle divergent branches
+        this.log('[GitService.pull] Attempting pull --rebase...');
         await this.git.pull('origin', 'main', { '--rebase': 'true' });
+        this.log('[GitService.pull] Pull successful!');
       } catch (error: unknown) {
         const gitError = error as { message?: string };
+        this.log(`[GitService.pull] Pull failed: ${gitError.message}`);
 
         // Empty repo - no remote branches yet, skip pull
         if (gitError.message?.includes("couldn't find remote ref")) {
+          this.log('[GitService.pull] Empty repo, skipping pull');
           // Pop stash if we had changes
           if (hasChanges) {
             await this.git.stash(['pop']).catch(() => { });
@@ -393,7 +609,7 @@ export class GitService {
           return;
         }
 
-        // Divergent branches or rebase conflict - use "local wins" strategy
+        // Divergent branches or rebase conflict - use "Smart Merge" strategy
         if (gitError.message?.includes('divergent') ||
           gitError.message?.includes('reconcile') ||
           gitError.message?.includes('CONFLICT') ||
@@ -403,22 +619,9 @@ export class GitService {
           gitError.message?.includes('needs merge') ||
           gitError.message?.includes('could not write index') ||
           gitError.message?.includes('index.lock')) {
-          // Cleanup any stale git state
-          await this.git.rebase({ '--abort': null }).catch(() => { });
-          await this.git.raw(['merge', '--abort']).catch(() => { });
-          this.cleanupIndexLock();
 
-          // Pop stash first to restore local changes
-          if (hasChanges) {
-            await this.git.stash(['pop']).catch(() => { });
-          }
-
-          // Stage all local changes and commit
-          await this.git.add('-A');
-          await this.git.commit('Sync: local changes preserved').catch(() => { });
-
-          // Force push local version to remote (local wins)
-          await this.git.push('origin', 'main', ['--force']).catch(() => { });
+          this.log(`[GitService.pull] Conflict detected, calling handleSmartMerge(hasChanges=${hasChanges})...`);
+          await this.handleSmartMerge(hasChanges);
           return;
         }
 

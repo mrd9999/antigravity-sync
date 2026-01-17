@@ -103,6 +103,9 @@ export class SidePanelProvider implements vscode.WebviewViewProvider {
     if (isConfigured) {
       await this.updateStatus();
 
+      // Wire git logger to UI panel (for when extension is already configured)
+      this._syncService.setGitLogger((msg, type) => this.sendLog(msg, type));
+
       // Start auto-sync timer if not already running
       this._syncService.setCountdownCallback((seconds) => {
         if (this._view) {
@@ -165,6 +168,9 @@ export class SidePanelProvider implements vscode.WebviewViewProvider {
       // Initialize sync
       this.sendLog('Initializing Git repository...', 'info');
       await this._syncService.initialize();
+
+      // Wire git logger to UI panel
+      this._syncService.setGitLogger((msg, type) => this.sendLog(msg, type));
 
       this.sendLog('Connected successfully!', 'success');
 

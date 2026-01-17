@@ -17,6 +17,12 @@ export interface SyncStatus {
   repository: string | null;
 }
 
+// Helper to format timestamp
+function ts(): string {
+  const now = new Date();
+  return `[${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}]`;
+}
+
 // Default auto-sync interval: 5 minutes
 const AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -79,17 +85,27 @@ export class SyncService {
    */
   async sync(): Promise<void> {
     if (this.isSyncing) {
+      console.log('[SyncService.sync] Already syncing, skipping...');
       return;
     }
 
     this.isSyncing = true;
     this.statusBar.update(SyncState.Syncing);
+    console.log('[SyncService.sync] === SYNC STARTED ===');
 
     try {
+      // Pull remote changes first
+      console.log('[SyncService.sync] Step 1: Pulling remote changes...');
       await this.pull();
-      await this.push();
+
+      // Push local changes (no need to pull again, already done)
+      console.log('[SyncService.sync] Step 2: Pushing local changes...');
+      await this.pushWithoutPull();
+
+      console.log('[SyncService.sync] === SYNC COMPLETE ===');
       this.statusBar.update(SyncState.Synced);
     } catch (error) {
+      console.log(`[SyncService.sync] Sync failed: ${(error as Error).message}`);
       this.statusBar.update(SyncState.Error);
       throw error;
     } finally {
@@ -106,28 +122,68 @@ export class SyncService {
     }
 
     this.statusBar.update(SyncState.Pushing);
+    console.log('[SyncService.push] === PUSH STARTED ===');
 
     try {
-      // Pull first to avoid divergent branches
+      // Pull first to avoid divergent branches (when called standalone)
+      console.log('[SyncService.push] Step 1: Pulling to avoid divergence...');
       await this.gitService.pull();
 
       // Copy filtered files to sync repo
-      await this.copyFilesToSyncRepo();
+      console.log('[SyncService.push] Step 2: Copying local files to sync repo...');
+      const filesCopied = await this.copyFilesToSyncRepo();
+      console.log(`[SyncService.push] Copied ${filesCopied} files to sync repo`);
 
       // Stage and commit
+      console.log('[SyncService.push] Step 3: Staging and committing...');
       await this.gitService.stageAll();
       const commitHash = await this.gitService.commit(
         `Sync: ${new Date().toISOString()}`
       );
 
       if (commitHash) {
+        console.log(`[SyncService.push] Step 4: Pushing commit ${commitHash.substring(0, 7)}...`);
         await this.gitService.push();
+        console.log('[SyncService.push] Push successful!');
+      } else {
+        console.log('[SyncService.push] No changes to commit');
       }
 
+      console.log('[SyncService.push] === PUSH COMPLETE ===');
       this.statusBar.update(SyncState.Synced);
     } catch (error) {
+      console.log(`[SyncService.push] Push failed: ${(error as Error).message}`);
       this.statusBar.update(SyncState.Error);
       throw error;
+    }
+  }
+
+  /**
+   * Push without initial pull (used by sync() to avoid double pull)
+   */
+  private async pushWithoutPull(): Promise<void> {
+    if (!this.gitService) {
+      throw new Error('Sync not initialized');
+    }
+
+    // Copy filtered files to sync repo
+    console.log('[SyncService.pushWithoutPull] Copying local files to sync repo...');
+    const filesCopied = await this.copyFilesToSyncRepo();
+    console.log(`[SyncService.pushWithoutPull] Copied ${filesCopied} files`);
+
+    // Stage and commit
+    console.log('[SyncService.pushWithoutPull] Staging and committing...');
+    await this.gitService.stageAll();
+    const commitHash = await this.gitService.commit(
+      `Sync: ${new Date().toISOString()}`
+    );
+
+    if (commitHash) {
+      console.log(`[SyncService.pushWithoutPull] Pushing commit ${commitHash.substring(0, 7)}...`);
+      await this.gitService.push();
+      console.log('[SyncService.pushWithoutPull] Push successful!');
+    } else {
+      console.log('[SyncService.pushWithoutPull] No changes to commit');
     }
   }
 
@@ -140,12 +196,19 @@ export class SyncService {
     }
 
     this.statusBar.update(SyncState.Pulling);
+    console.log('[SyncService.pull] === PULL STARTED ===');
 
     try {
       await this.gitService.pull();
-      await this.copyFilesFromSyncRepo();
+
+      console.log('[SyncService.pull] Copying files from sync repo to Gemini folder...');
+      const filesCopied = await this.copyFilesFromSyncRepo();
+      console.log(`[SyncService.pull] Copied ${filesCopied} files to Gemini folder`);
+
+      console.log('[SyncService.pull] === PULL COMPLETE ===');
       this.statusBar.update(SyncState.Synced);
     } catch (error) {
+      console.log(`[SyncService.pull] Pull failed: ${(error as Error).message}`);
       this.statusBar.update(SyncState.Error);
       throw error;
     }
@@ -215,16 +278,18 @@ export class SyncService {
 
   /**
    * Copy filtered files from gemini folder to sync repo
+   * @returns number of files copied
    */
-  private async copyFilesToSyncRepo(): Promise<void> {
+  private async copyFilesToSyncRepo(): Promise<number> {
     const config = this.configService.getConfig();
     const syncRepoPath = this.configService.getSyncRepoPath();
 
     if (!this.filterService) {
-      return;
+      return 0;
     }
 
     const filesToSync = await this.filterService.getFilesToSync();
+    let copiedCount = 0;
 
     for (const relativePath of filesToSync) {
       const sourcePath = path.join(config.geminiPath, relativePath);
@@ -239,33 +304,39 @@ export class SyncService {
       // Copy file
       if (fs.existsSync(sourcePath)) {
         fs.copyFileSync(sourcePath, destPath);
+        copiedCount++;
       }
     }
+
+    return copiedCount;
   }
 
   /**
    * Copy files from sync repo back to gemini folder
+   * @returns number of files copied
    */
-  private async copyFilesFromSyncRepo(): Promise<void> {
+  private async copyFilesFromSyncRepo(): Promise<number> {
     const config = this.configService.getConfig();
     const syncRepoPath = this.configService.getSyncRepoPath();
 
     // Walk sync repo and copy back (excluding .git)
-    await this.copyDirectoryContents(syncRepoPath, config.geminiPath, ['.git']);
+    return await this.copyDirectoryContents(syncRepoPath, config.geminiPath, ['.git']);
   }
 
   /**
    * Recursively copy directory contents
+   * @returns number of files copied
    */
   private async copyDirectoryContents(
     source: string,
     dest: string,
     excludeDirs: string[] = []
-  ): Promise<void> {
+  ): Promise<number> {
     if (!fs.existsSync(source)) {
-      return;
+      return 0;
     }
 
+    let count = 0;
     const entries = fs.readdirSync(source, { withFileTypes: true });
 
     for (const entry of entries) {
@@ -277,17 +348,18 @@ export class SyncService {
       const destPath = path.join(dest, entry.name);
 
       if (entry.isDirectory()) {
-        if (!fs.existsSync(destPath)) {
-        }
-        await this.copyDirectoryContents(sourcePath, destPath, excludeDirs);
+        count += await this.copyDirectoryContents(sourcePath, destPath, excludeDirs);
       } else {
         const destDir = path.dirname(destPath);
         if (!fs.existsSync(destDir)) {
           fs.mkdirSync(destDir, { recursive: true });
         }
         fs.copyFileSync(sourcePath, destPath);
+        count++;
       }
     }
+
+    return count;
   }
 
   /**
@@ -295,6 +367,15 @@ export class SyncService {
    */
   setCountdownCallback(callback: (seconds: number) => void): void {
     this.countdownCallback = callback;
+  }
+
+  /**
+   * Set logger callback for GitService to send logs to UI
+   */
+  setGitLogger(logger: (message: string, type: 'info' | 'success' | 'error') => void): void {
+    if (this.gitService) {
+      this.gitService.setLogger(logger);
+    }
   }
 
   /**
