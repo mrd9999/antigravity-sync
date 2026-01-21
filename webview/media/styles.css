@@ -525,3 +525,60 @@ vscode-divider {
 .codicon-close::before {
   content: "\ea76";
 }
+
+.codicon-terminal::before {
+  content: "\eb68";
+}
+
+.codicon-clear-all::before {
+  content: "\eb4a";
+}
+
+.codicon-play::before {
+  content: "\eb88";
+}
+
+.codicon-debug-stop::before {
+  content: "\eb5a";
+}
+
+.codicon-refresh::before {
+  content: "\eb37";
+}
+
+/* ========== Auto Retry Section ========== */
+.auto-retry-section {
+  padding: var(--spacing-sm) 0;
+}
+
+.auto-retry-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.auto-retry-controls vscode-button .codicon {
+  margin-right: var(--spacing-xs);
+}
+
+.auto-retry-status {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  padding: 2px 8px;
+  background: var(--vscode-input-background);
+  border-radius: var(--radius-sm);
+}
+
+.auto-retry-status.running {
+  color: var(--vscode-terminal-ansiGreen, #4ec9b0);
+  background: color-mix(in srgb, var(--vscode-testing-iconPassed) 15%, transparent);
+}
+
+.auto-retry-count {
+  margin-top: var(--spacing-sm);
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--vscode-input-background);
+  border-radius: var(--radius-sm);
+}

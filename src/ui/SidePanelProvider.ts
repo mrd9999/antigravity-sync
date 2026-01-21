@@ -6,6 +6,7 @@ import { SyncService } from '../services/SyncService';
 import { ConfigService } from '../services/ConfigService';
 import { NotificationService } from '../services/NotificationService';
 import { GitService } from '../services/GitService';
+import { AutoRetryService } from '../services/AutoRetryService';
 
 export class SidePanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'antigravitySync.mainPanel';
@@ -14,6 +15,7 @@ export class SidePanelProvider implements vscode.WebviewViewProvider {
   private readonly _extensionUri: vscode.Uri;
   private readonly _syncService: SyncService;
   private readonly _configService: ConfigService;
+  private readonly _autoRetryService: AutoRetryService;
 
   constructor(
     extensionUri: vscode.Uri,
@@ -23,6 +25,7 @@ export class SidePanelProvider implements vscode.WebviewViewProvider {
     this._extensionUri = extensionUri;
     this._syncService = syncService;
     this._configService = configService;
+    this._autoRetryService = new AutoRetryService();
   }
 
   public resolveWebviewView(
@@ -75,6 +78,12 @@ export class SidePanelProvider implements vscode.WebviewViewProvider {
         case 'getGitStatus':
           // Just refresh status (git fetch + check) - no file copy needed
           await this.sendGitStatus();
+          break;
+        case 'startAutoRetry':
+          await this.handleStartAutoRetry();
+          break;
+        case 'stopAutoRetry':
+          await this.handleStopAutoRetry();
           break;
       }
     });
@@ -446,6 +455,84 @@ export class SidePanelProvider implements vscode.WebviewViewProvider {
    */
   public async updatePanelData(): Promise<void> {
     await this.sendConfigState();
+  }
+
+  /**
+   * Handle start auto-retry from webview
+   * Single button flow: check CDP -> if OK, start; if not, auto-setup
+   */
+  private async handleStartAutoRetry(): Promise<void> {
+    this.sendAutoRetryLog('Checking CDP...', 'info');
+
+    // Set up log callback
+    this._autoRetryService.setLogCallback((msg, type) => {
+      this.sendAutoRetryLog(msg, type === 'warning' ? 'info' : type);
+    });
+
+    // Check CDP status first
+    const cdpAvailable = await this._autoRetryService.isCDPAvailable();
+
+    if (!cdpAvailable) {
+      // CDP not available - auto setup
+      this.sendAutoRetryLog('CDP not enabled. Setting up...', 'info');
+      const setupSuccess = await this._autoRetryService.setupCDP();
+
+      if (setupSuccess) {
+        // Setup done, user needs to restart - dialog already shown by Relauncher
+        this.sendAutoRetryLog('Please restart IDE to enable Auto Retry', 'info');
+      } else {
+        this.sendAutoRetryLog('Setup failed. Check instructions above.', 'error');
+      }
+      this.sendAutoRetryStatus();
+      return;
+    }
+
+    // CDP available - start immediately
+    this.sendAutoRetryLog('CDP available! Starting...', 'success');
+    const started = await this._autoRetryService.start();
+
+    if (started) {
+      this.sendAutoRetryStatus();
+      NotificationService.info('Auto Retry started - auto-clicking Retry buttons');
+    } else {
+      this.sendAutoRetryStatus();
+    }
+  }
+
+  /**
+   * Handle stop auto-retry from webview
+   */
+  private async handleStopAutoRetry(): Promise<void> {
+    await this._autoRetryService.stop();
+    this.sendAutoRetryStatus();
+    this.sendAutoRetryLog('Auto Retry stopped', 'info');
+  }
+
+  /**
+   * Send auto-retry status to webview
+   */
+  private sendAutoRetryStatus(): void {
+    if (!this._view) return;
+    const status = this._autoRetryService.getStatus();
+    this._view.webview.postMessage({
+      type: 'autoRetryStatus',
+      data: {
+        running: status.running,
+        retryCount: status.retryCount,
+        connectionCount: status.connectionCount
+      }
+    });
+  }
+
+  /**
+   * Send auto-retry log message to webview
+   */
+  private sendAutoRetryLog(message: string, logType: 'success' | 'error' | 'info'): void {
+    if (!this._view) return;
+    this._view.webview.postMessage({
+      type: 'autoRetryLog',
+      data: { message, logType }
+    });
   }
 
   /**

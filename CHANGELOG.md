@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-01-22
+
+### Added
+- **Auto Retry**: Automatically click Retry buttons when AI agent encounters errors
+- CDP (Chrome DevTools Protocol) integration for Auto Retry
+- Platform-specific setup dialogs (macOS, Windows, Linux)
+- One-click Auto Retry: Check CDP → Auto setup → Show instructions
+- About Me section in README with VNLF link
+
+### Changed
+- Improved git sync logic with better merge conflict handling
+
 ## [0.2.0] - 2026-01-15
 
 ### Added

@@ -4,3 +4,4 @@ dist/
 .vscode-test/
 .DS_Store
 *.log
+.GEMINI.md

@@ -40,6 +40,34 @@ export class MainPanel {
           <div id="config-error" class="error-box" style="display: none;"></div>
         </section>
 
+        <!-- Auto Retry Section (CDP-based) -->
+        <section class="auto-retry-section" id="auto-retry-section">
+          <vscode-divider></vscode-divider>
+          <div class="section-header">
+            <span class="codicon codicon-zap"></span>
+            <span class="section-title">Auto Retry</span>
+          </div>
+          <p class="description" style="font-size: 11px; opacity: 0.8; margin: 0 0 8px 0;">
+            Auto-click Retry buttons when AI agent encounters errors
+          </p>
+          
+          <!-- Single Start/Stop Button -->
+          <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+            <vscode-button id="btn-start-auto-accept" appearance="primary" style="flex: 1;">
+              <span class="codicon codicon-play"></span>
+              Start Auto Retry
+            </vscode-button>
+            <vscode-button id="btn-stop-auto-accept" appearance="secondary" style="flex: 1; display: none;">
+              <span class="codicon codicon-debug-stop"></span>
+              Stop
+            </vscode-button>
+          </div>
+          
+          <div id="auto-retry-log" class="log-output" style="margin-top: 8px; max-height: 120px;">
+            <div class="log-empty">Click Start to enable auto-retry</div>
+          </div>
+        </section>
+
         <!-- Main Dashboard (shown when configured) -->
         <section id="dashboard-section" class="dashboard-section" style="display: none;">
           <!-- Status Card -->
@@ -150,7 +178,7 @@ export class MainPanel {
           <div class="log-section">
             <div class="section-header">
               <span class="codicon codicon-terminal"></span>
-              <span class="section-title">Log</span>
+              <span class="section-title">Sync Log</span>
               <vscode-button appearance="icon" id="btn-clear-log" title="Clear log">
                 <span class="codicon codicon-clear-all"></span>
               </vscode-button>
@@ -248,6 +276,21 @@ export class MainPanel {
     document.getElementById('btn-refresh-status')?.addEventListener('click', () => {
       setRefreshLoading(true);
       vscode.postMessage({ type: 'getGitStatus' });
+    });
+
+    // Clear log button
+    document.getElementById('btn-clear-log')?.addEventListener('click', () => {
+      clearLog();
+    });
+
+    // Auto Retry - Start
+    document.getElementById('btn-start-auto-accept')?.addEventListener('click', () => {
+      vscode.postMessage({ type: 'startAutoRetry' });
+    });
+
+    // Auto Retry - Stop
+    document.getElementById('btn-stop-auto-accept')?.addEventListener('click', () => {
+      vscode.postMessage({ type: 'stopAutoRetry' });
     });
   }
 }
@@ -469,5 +512,87 @@ export function updateCountdown(seconds: number): void {
       const secs = seconds % 60;
       countdownEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
     }
+  }
+}
+
+export function updateAutoRetryStatus(running: boolean, retryCount: number, connectionCount?: number): void {
+  const startBtn = document.getElementById('btn-start-auto-accept');
+  const stopBtn = document.getElementById('btn-stop-auto-accept');
+  const cdpIcon = document.getElementById('cdp-status-icon');
+  const cdpText = document.getElementById('cdp-status-text');
+
+  if (startBtn && stopBtn) {
+    startBtn.style.display = running ? 'none' : 'inline-flex';
+    stopBtn.style.display = running ? 'inline-flex' : 'none';
+  }
+
+  // Update CDP connection status if running
+  if (running && connectionCount !== undefined && cdpIcon && cdpText) {
+    cdpIcon.className = 'codicon codicon-check';
+    cdpIcon.style.color = 'var(--vscode-debugIcon-startForeground)';
+    cdpText.textContent = `CDP: ${connectionCount} page(s) connected`;
+  }
+}
+
+export function updateCDPStatus(available: boolean, hasFlag: boolean, port: number): void {
+  const cdpIcon = document.getElementById('cdp-status-icon');
+  const cdpText = document.getElementById('cdp-status-text');
+  const setupBtn = document.getElementById('btn-setup-cdp');
+  const logOutput = document.getElementById('auto-retry-log');
+
+  if (cdpIcon && cdpText) {
+    if (available) {
+      cdpIcon.className = 'codicon codicon-check';
+      cdpIcon.style.color = 'var(--vscode-debugIcon-startForeground)';
+      cdpText.textContent = `CDP: Connected (port ${port})`;
+    } else if (hasFlag) {
+      cdpIcon.className = 'codicon codicon-warning';
+      cdpIcon.style.color = 'var(--vscode-debugIcon-pauseForeground)';
+      cdpText.textContent = 'CDP: Has flag but not responding';
+    } else {
+      cdpIcon.className = 'codicon codicon-circle-outline';
+      cdpIcon.style.color = 'var(--vscode-debugIcon-disconnectForeground)';
+      cdpText.textContent = `CDP: Not connected (port ${port})`;
+    }
+  }
+
+  // Update setup button visibility
+  if (setupBtn) {
+    setupBtn.style.display = available ? 'none' : 'inline-flex';
+  }
+
+  // Update log hint
+  if (logOutput && !available) {
+    const empty = logOutput.querySelector('.log-empty');
+    if (empty) {
+      empty.textContent = hasFlag
+        ? 'CDP not responding. Try restarting IDE.'
+        : `Click "Setup CDP" then restart IDE with --remote-debugging-port=${port}`;
+    }
+  }
+}
+
+export function appendAutoRetryLog(message: string, type: 'success' | 'error' | 'info' = 'info'): void {
+  const logOutput = document.getElementById('auto-retry-log');
+  if (!logOutput) return;
+
+  // Remove empty message
+  const empty = logOutput.querySelector('.log-empty');
+  if (empty) empty.remove();
+
+  // Create new log line
+  const line = document.createElement('div');
+  line.className = `log-line log-${type}`;
+  line.textContent = message;
+
+  // Add to bottom
+  logOutput.appendChild(line);
+
+  // Auto-scroll to bottom
+  logOutput.scrollTop = logOutput.scrollHeight;
+
+  // Keep only last 20 lines
+  while (logOutput.children.length > 20) {
+    logOutput.firstChild?.remove();
   }
 }

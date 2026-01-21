@@ -1,4 +1,4 @@
-# Antigravity Sync
+# Antigravity Sync - Retry
 
 > 🇻🇳 **Người dùng Việt Nam:** Xem [README tiếng Việt](README_VI.md) để có hướng dẫn chi tiết bằng tiếng Việt.
 
@@ -6,11 +6,66 @@
 [![Open VSX](https://img.shields.io/open-vsx/v/mrd9999/antigravity-sync)](https://open-vsx.org/extension/mrd9999/antigravity-sync)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-VS Code Extension to sync **Gemini Antigravity context** (`~/.gemini/antigravity/`) across machines via private Git repository.
+**Auto-sync AI context + Auto-accept/retry for AI coding agents. Zero-babysitting automation.**
 
-**Problem:** When switching machines, all conversation history, Knowledge Items and brain artifacts of Gemini Antigravity are lost. This extension auto-syncs via Git to solve that.
+---
 
-![Antigravity Sync Panel](docs/images/panel-preview.png)
+## 👤 About Me
+
+**Dung Le** — Software Engineer from Vietnam 🇻🇳
+
+- 💼 **Facebook:** [@mrd.900s](https://www.facebook.com/mrd.900s)
+- 🐙 **GitHub:** [mrd9999](https://github.com/mrd9999)
+- 🐧 **VNLF:** [Vietnam Linux Family](https://www.facebook.com/groups/vietnamlinuxcommunity)
+
+---
+
+## Screenshots
+
+| Auto Retry | Sync Dashboard |
+|:-----------:|:--------------:|
+| ![Auto Retry](resources/screenshot.png) | ![Sync](docs/images/panel-preview.png) |
+
+---
+
+## 🤖 Auto Retry
+
+Automatically click **Retry** buttons when AI agents encounter errors. Zero-babysitting automation!
+
+### How It Works
+
+Uses Chrome DevTools Protocol (CDP) to inject a script that monitors the IDE webview and auto-clicks approval buttons.
+
+### Quick Start
+
+1. Open **Antigravity Sync** panel in sidebar
+2. Click **"Start Auto Retry"**
+3. First time: Follow setup dialog to enable CDP
+4. **Restart IDE** (Quit + Reopen using the command shown)
+5. Click **"Start Auto Retry"** again → Active! ✅
+
+### Supported IDEs
+
+- ✅ VS Code
+- ✅ Cursor  
+- ✅ Antigravity
+- ✅ Other Electron-based IDEs
+
+### Platform Support
+
+| Platform | Status |
+|----------|--------|
+| macOS | ✅ Full support |
+| Windows | ✅ Full support |
+| Linux | ✅ Full support |
+
+---
+
+## 🔄 Auto Sync
+
+Sync **Gemini Antigravity context** (`~/.gemini/antigravity/`) across machines via private Git repository.
+
+**Problem solved:** When switching machines, all conversation history, Knowledge Items and brain artifacts are lost. This extension auto-syncs via Git to preserve everything.
 
 ---
 

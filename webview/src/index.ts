@@ -17,7 +17,7 @@ provideVSCodeDesignSystem().register(
   vsCodeTextField()
 );
 
-import { MainPanel, showConfigured, updateStatus, showError, showConfigError, appendLog, clearLog, updateGitStatus, setRefreshLoading, updateCountdown } from './panels/MainPanel';
+import { MainPanel, showConfigured, updateStatus, showError, showConfigError, appendLog, clearLog, updateGitStatus, setRefreshLoading, updateCountdown, updateAutoRetryStatus, appendAutoRetryLog, updateCDPStatus } from './panels/MainPanel';
 
 // Declare vscode API type
 interface VsCodeApi {
@@ -81,7 +81,22 @@ interface CountdownMessage {
   data: { seconds: number };
 }
 
-type ExtensionMessage = ConfiguredMessage | StatusMessage | ErrorMessage | ConfigErrorMessage | LogMessage | ClearLogMessage | GitStatusMessage | CountdownMessage;
+interface AutoRetryStatusMessage {
+  type: 'autoRetryStatus';
+  data: { running: boolean; retryCount: number; connectionCount?: number };
+}
+
+interface AutoRetryLogMessage {
+  type: 'autoRetryLog';
+  data: { message: string; logType: 'success' | 'error' | 'info' };
+}
+
+interface CDPStatusMessage {
+  type: 'cdpStatus';
+  data: { available: boolean; hasFlag: boolean; port: number };
+}
+
+type ExtensionMessage = ConfiguredMessage | StatusMessage | ErrorMessage | ConfigErrorMessage | LogMessage | ClearLogMessage | GitStatusMessage | CountdownMessage | AutoRetryStatusMessage | AutoRetryLogMessage | CDPStatusMessage;
 
 window.addEventListener('message', (event: MessageEvent<ExtensionMessage>) => {
   const message = event.data;
@@ -110,6 +125,15 @@ window.addEventListener('message', (event: MessageEvent<ExtensionMessage>) => {
       break;
     case 'countdown':
       updateCountdown(message.data.seconds);
+      break;
+    case 'autoRetryStatus':
+      updateAutoRetryStatus(message.data.running, message.data.retryCount, message.data.connectionCount);
+      break;
+    case 'autoRetryLog':
+      appendAutoRetryLog(message.data.message, message.data.logType);
+      break;
+    case 'cdpStatus':
+      updateCDPStatus(message.data.available, message.data.hasFlag, message.data.port);
       break;
   }
 });

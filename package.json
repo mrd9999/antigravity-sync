@@ -1,8 +1,8 @@
 {
   "name": "antigravity-sync",
-  "displayName": "Antigravity Sync",
-  "description": "Sync your Gemini Antigravity context across machines via private Git repository. Never lose your AI conversation history, Knowledge Items, and brain artifacts when switching computers.",
-  "version": "0.2.2",
+  "displayName": "Antigravity Sync - Retry",
+  "description": "Auto-sync AI context + Auto-accept/retry for AI coding agents. Zero-babysitting automation.",
+  "version": "0.3.1",
   "publisher": "mrd9999",
   "author": "Dung Le <https://www.facebook.com/mrd.900s>",
   "icon": "resources/icons/icon.png",
@@ -22,12 +22,16 @@
     "Other"
   ],
   "keywords": [
-    "sync",
-    "settings",
-    "gemini",
-    "antigravity",
-    "backup",
-    "ai-context"
+    "antigravity sync",
+    "antigravity auto retry",
+    "antigravity auto retry",
+    "auto retry",
+    "auto retry",
+    "cursor auto retry",
+    "vscode auto retry",
+    "ai agent automation",
+    "zero babysitting",
+    "cdp automation"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -132,6 +136,46 @@
             "type": "string"
           },
           "description": "Folders to sync within .gemini directory"
+        },
+        "antigravitySync.autoRetryEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable auto-accept for AI agent buttons (requires CDP setup)"
+        },
+        "antigravitySync.cdpPort": {
+          "type": "number",
+          "default": 31905,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "CDP remote debugging port for auto-accept"
+        },
+        "antigravitySync.cdpPortRange": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Port range to scan (port ± range)"
+        },
+        "antigravitySync.autoRetryInterval": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 30,
+          "description": "Interval in seconds between retry checks"
+        },
+        "antigravitySync.autoRetryMaxRetries": {
+          "type": "number",
+          "default": 50,
+          "minimum": 1,
+          "maximum": 500,
+          "description": "Maximum number of auto-retries before stopping"
+        },
+        "antigravitySync.autoRetryCooldown": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 60,
+          "description": "Cooldown in seconds after clicking retry button"
         }
       }
     }
@@ -155,6 +199,7 @@
     "@types/node": "^20.10.0",
     "@types/vscode": "^1.85.0",
     "@types/vscode-webview": "^1.57.4",
+    "@types/ws": "^8.5.10",
     "@typescript-eslint/eslint-plugin": "^6.13.0",
     "@typescript-eslint/parser": "^6.13.0",
     "@vscode/test-electron": "^2.3.8",
@@ -175,6 +220,7 @@
     "@vscode/webview-ui-toolkit": "^1.4.0",
     "chokidar": "^3.5.3",
     "ignore": "^5.3.0",
-    "simple-git": "^3.21.0"
+    "simple-git": "^3.21.0",
+    "ws": "^8.14.0"
   }
 }
